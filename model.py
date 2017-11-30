@@ -87,9 +87,9 @@ class CommNet(nn.Module):
         if self.opts['comm_encoder']:
             # before merging comm and hidden, use a linear layer for comm
             if self.use_lstm: # LSTM has 4x weights for gates
-                self._comm2hid_linear = LinearMulti(self.nmodels, self.hidsz, self.hidsz * 4)
+                self._comm2hid_linear_lstm = LinearMulti(self.nmodels, self.hidsz, self.hidsz * 4)
                 if self.opts['comm_zero_init']:
-                    self._comm2hid_linear.init_zero()
+                    self._comm2hid_linear_lstm.init_zero()
             else:
                 self._comm2hid_linear = LinearMulti(self.nmodels, self.hidsz, self.hidsz)
                 if self.opts['comm_zero_init']:
@@ -97,9 +97,9 @@ class CommNet(nn.Module):
 
         # RNN: (comm + hidden) -> hidden
         if self.use_lstm:
-            self._rnn_enc = self.__build_encoder(self.hidsz * 4)
-            self._rnn_linear = LinearMulti(self.nmodels, self.hidsz, self.hidsz * 4)
-            self._rnn_linear.init_normal(self.init_std)
+            self._lstm_enc = self.__build_encoder(self.hidsz * 4)
+            self._lstm_linear = LinearMulti(self.nmodels, self.hidsz, self.hidsz * 4)
+            self._lstm_linear.init_normal(self.init_std)
         else:
             self._rnn_enc = self.__build_encoder(self.hidsz)
             self._rnn_linear = LinearMulti(self.nmodels, self.hidsz, self.hidsz)
@@ -176,10 +176,13 @@ class CommNet(nn.Module):
         """
         # Lua Sum(2) -> Python sum(1)
         # [batch x nagents, nagents, hidsz] -> [batch x nagents, hidsz]
-        comm2hid = torch.sum(comm_in, 1)
+        comm_ = torch.sum(comm_in, 1)
         if self.opts['comm_encoder']:
-            comm2hid = self._comm2hid_linear(comm2hid, self.agent_ids)
-        return comm2hid
+            if self.use_lstm:
+                comm_ = self._comm2hid_linear_lstm(comm_, self.agent_ids)
+            else:
+                comm_ = self._comm2hid_linear(comm_, self.agent_ids)
+        return comm_
 
     def __hid2hid(self, inp, comm_, prev_hid, prev_cell):
         """
@@ -195,35 +198,36 @@ class CommNet(nn.Module):
         return hidstate
 
     def _lstm(self, inp, comm_, prev_hid, prev_cell):
+        """
+            run lstm module
+        """
         pre_hid = []
-        pre_hid.append(self._rnn_enc(inp))
-        pre_hid.append(self._rnn_linear(prev_hid, self.agent_ids))
-        # if comm_in:
-        pre_hid.append(comm_)
-        A = sum(pre_hid)
-        B = A.view(-1, 4, self.hidsz)
-        C = torch.split(B, self.hidsz, 0)
-        # TODO: not finished
+        pre_hid.append(self._lstm_enc(inp))                         # [batch x nagents, hidsz x 4]
+        pre_hid.append(self._lstm_linear(prev_hid, self.agent_ids)) # [batch x nagents, hidsz x 4]
+        pre_hid.append(comm_)                                       # [batch x nagents, hidsz]
 
-        gate_forget = nn.Sigmoid()(C[0][0])
-        gate_write = nn.Sigmoid()(C[0][1])
-        gate_read = nn.Sigmoid()(C[0][2])
-        in2c = self.__nonlin()(C[0][3])
-        # print gate_forget.size(), prev_cell.size()
-        # print in2c.size(), gate_write.transpose(0,1).size()
+        A = sum(pre_hid)                                            # [batch x nagents, hidsz x 4]
+        B = A.view(4, self.hidsz, -1)                               # [4, hidsz, batch x nagents]
+        C = torch.split(B, self.hidsz, 0)[0]
+
+        gate_forget = nn.Sigmoid()(C[0])                            # [hidsz, batch x nagents]
+        gate_write = nn.Sigmoid()(C[1])                             # [hidsz, batch x nagents]
+        gate_read = nn.Sigmoid()(C[2])                              # [hidsz, batch x nagents]
+        in2c = self.__nonlin()(C[3])                                # [hidsz, batch x nagents]
+
         cellstate = sum([
-            torch.matmul(gate_forget, prev_cell),
-            torch.matmul(in2c.transpose(0,1), gate_write)
+            prev_cell * gate_forget,                                # elementwise
+            in2c * gate_write                                       # elementwise
         ])
-        hidstate = torch.matmul(self.__nonlin()(cellstate), gate_read)
+        hidstate = self.__nonlin()(cellstate) * gate_read           # elementwise
         return hidstate, cellstate
 
     def _rnn(self, inp, comm_, prev_hid):
         """ returns RNN is just a FC layer, next hidden """
         pre_hid = []
-        pre_hid.append(self._rnn_enc(inp)) # encodes input state into feature vec
+        pre_hid.append(self._rnn_enc(inp))                          # encodes input state into feature vec
         pre_hid.append(self._rnn_linear(prev_hid, self.agent_ids))
-        pre_hid.append(comm_) # if comm_:
+        pre_hid.append(comm_)
         return self.__nonlin()(sum(pre_hid))
 
     def __action(self, hidstate):

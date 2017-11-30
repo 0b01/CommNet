@@ -10,7 +10,7 @@ class LinearMulti(nn.Module):
     """
     Fetch the weight and bias from a lookup table based on agent/model id
     Params:
-        sz_in: input layer
+        sz_in: inp layer
         sz_out: output layer
         model_ids: agent/model id
     Returns:
@@ -44,23 +44,23 @@ class LinearMulti(nn.Module):
             self.weight_lut.weight.data.normal_(0, init_std)
             self.bias_lut.weight.data.normal_(0, init_std)
 
-    def forward(self, input, model_ids):
+    def forward(self, inp, agent_ids):
         """
         Params:
-            input: shape [len(model_ids), sz_in]
+            inp: shape [len(agent_ids), sz_in]
         """
         if self.nmodels == 1:
-            return self.linear(input)
+            return self.linear(inp)
         else:
-            weight = self.weight_lut(model_ids) # 1 x 3 x 200
+            weight = self.weight_lut(agent_ids) # 1 x 3 x 200
             weight_view = weight.view(-1, self.sz_in, self.sz_out) # 3 x 10 x 20
-            bias = self.bias_lut(model_ids) # 1 x 3 x 20
+            bias = self.bias_lut(agent_ids) # 1 x 3 x 20
             bias_view = bias.view(-1, self.sz_out) # 3x20
 
-            a, b = input.size()
-            input = input.view(a, 1, b) # 3x1x10
+            a, b = inp.size()
+            inp = inp.view(a, 1, b) # 3x1x10
 
-            out = torch.matmul(input, weight_view) # 3x1x20
+            out = torch.matmul(inp, weight_view) # 3x1x20
 
             a, b, c = out.size()
             out = out.view(a, c) #3x20
@@ -70,10 +70,10 @@ class LinearMulti(nn.Module):
 
 if __name__ == "__main__":
     x = Variable(torch.ones(3, 4))
-    model_ids = Variable(torch.LongTensor([[1, 2, 1]]))
+    agent_ids = Variable(torch.LongTensor([[1, 2, 1]]))
 
     model = LinearMulti(3, 4, 1)
-    y = model.forward(x, model_ids)
+    y = model.forward(x, agent_ids)
     target = Variable(torch.FloatTensor([[3], [10], [3]]))
     print(target)
     print(y)
@@ -84,7 +84,7 @@ if __name__ == "__main__":
 
     for i in range(100):
         optimizer.zero_grad()
-        y = model(x, model_ids)
+        y = model(x, agent_ids)
         loss = loss_fn(y, target)
         loss.backward(retain_graph=True)
         optimizer.step()
