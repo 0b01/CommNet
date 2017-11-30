@@ -29,6 +29,14 @@ class LinearMulti(nn.Module):
             # possible use of `register_backward_hook`
             self.weight_lut = nn.Embedding(nmodels, sz_in * sz_out) # 1x3x200
             self.bias_lut = nn.Embedding(nmodels, sz_out) # 1x3x20
+    
+    def init_zero(self):
+        self.weight_lut.weight.data.zero_()
+        self.bias_lut.weight.data.zero_()
+
+    def init_normal(self):
+        self.weight_lut.weight.data.normal_(0, 0.1)
+        self.bias_lut.weight.data.normal_(0, 0.1)
 
     def forward(self, input, model_ids):
         """
