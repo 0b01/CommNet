@@ -1,5 +1,7 @@
 # Communication Neural Network (CommNet)
 
+![graph](https://cims.nyu.edu/~sainbar/commnet/model.png)
+
 [[Paper pdf]](https://arxiv.org/pdf/1605.07736.pdf)
 
 [[original Torch impl]](https://github.com/facebookresearch/CommNet/)
