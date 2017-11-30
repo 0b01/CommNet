@@ -1,12 +1,13 @@
-# import logging as log
-# # set logger
+import logging as log
+log.basicConfig(filename='rewards.log', level=log.INFO)
+
 import numpy as np
 from model import CommNet
 from torch.autograd import Variable
 from torch import nn
 import torch
 
-BATCH_SIZE = 2
+BATCH_SIZE = 16
 N_AGENTS = 5
 N_MODELS = 10
 N_LEVERS = 5
@@ -58,16 +59,15 @@ def train(nepisodes):
         # optimizer options
         'momentum': 0,              # momentum for SGD [0]
         'wdecay': 0,                # weight decay [0]
-        'rmsprop_alpha': 0.97,      # parameter of RMSProp [0.97]
+        'rmsprop_alpha': 0.99,      # parameter of RMSProp [0.97]
         'rmsprop_eps': 1e-6,        # parameter of RMSProp [1e-06]
         'adam_beta1': 0.9,          # parameter of Adam [0.9]
         'adam_beta2': 0.999,        # parameter of Adam [0.999]
         'adam_eps': 1e-8,           # parameter of Adam [1e-08]
-
     }
 
     actor = CommNet(opts)
-    print(actor)
+    # print(actor)
 
 
     # initialize variables for RNN
@@ -141,7 +141,6 @@ def train(nepisodes):
         if USE_CUDA:
             agent_ids = agent_ids.cuda()
 
-        print 'iter:', i,
         optimizer.zero_grad()
 
         # communication passes, K
@@ -188,7 +187,6 @@ def train(nepisodes):
         lever_output = torch.multinomial(action_prob, 1)        # something like 1, 2, 3, 4, 5
         lever_ids = lever_output.view(BATCH_SIZE, N_LEVERS)     # BATCH_SIZE x N_LEVERS
         one_hot = emb(lever_ids)                                # BATCH_SIZE x N_LEVERS x N_LEVERS
-        # print(one_hot)
 
         # sum the LEVER axis, then count the number of chosen levers
         distinct_sum = (one_hot.sum(1) > 0).sum(1).type(torch.FloatTensor)
@@ -197,7 +195,9 @@ def train(nepisodes):
         # negate reward to optimize for loss
         loss = - reward
 
-        print((reward.sum(0) / BATCH_SIZE).data[0])
+        printable_reward = (reward.sum(0) / BATCH_SIZE/ opts['reward_mult']).data[0]
+        print(printable_reward)
+        log.info(printable_reward)
 
         # repeat the rewards for each batch agent of each batch
         repeat_reward = reward \
