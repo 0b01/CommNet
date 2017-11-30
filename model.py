@@ -50,9 +50,15 @@ class CommNet(nn.Module):
 
                 # comm-related options
                 'comm_mode': 'avg',         # operation on incoming communication: avg | sum [avg]
+                'comm_scale_div': 1,        # divide comm vectors by this [1]
                 'comm_encoder': 0,          # encode incoming comm: 0=identity | 1=linear [0]
                 'comm_decoder': 1,          # decode outgoing comm: 0=identity | 1=linear | 2=nonlin [1]
-                'fully_connected': True,    # 
+                'comm_zero_init': True,     # initialize comm weights to zero
+                # comm_range
+                'nactions_comm': 0,         # enable discrete communication when larger than 1 [1]
+                # TODO: implement discrete comm
+                # dcomm_entropy_cost
+                'fully_connected': True,    # basically, all agent can talk to all agent
 
 
                 'nmodels': N_MODELS,        # the number of models in LookupTable
@@ -60,7 +66,6 @@ class CommNet(nn.Module):
                 'nactions': N_LEVERS,       # the number of agent actions
                 'batch_size': BATCH_SIZE,   # the size of mini-batch
 
-                'nactions_comm': 0,         # enable discrete communication when larger than 1 [1]
 
             }
     """
@@ -83,10 +88,12 @@ class CommNet(nn.Module):
             # before merging comm and hidden, use a linear layer for comm
             if self.use_lstm: # LSTM has 4x weights for gates
                 self._comm2hid_linear = LinearMulti(self.nmodels, self.hidsz, self.hidsz * 4)
-                self._comm2hid_linear.init_zero()
+                if self.opts['comm_zero_init']:
+                    self._comm2hid_linear.init_zero()
             else:
                 self._comm2hid_linear = LinearMulti(self.nmodels, self.hidsz, self.hidsz)
-                self._comm2hid_linear.init_zero()
+                if self.opts['comm_zero_init']:
+                    self._comm2hid_linear.init_zero()
 
         # RNN: (comm + hidden) -> hidden
         if self.use_lstm:

@@ -31,12 +31,18 @@ class LinearMulti(nn.Module):
             self.bias_lut = nn.Embedding(nmodels, sz_out) # 1x3x20
     
     def init_zero(self):
-        self.weight_lut.weight.data.zero_()
-        self.bias_lut.weight.data.zero_()
+        if self.nmodels == 1:
+            self.linear.weight.data.zero_()
+        else:
+            self.weight_lut.weight.data.zero_()
+            self.bias_lut.weight.data.zero_()
 
     def init_normal(self, init_std):
-        self.weight_lut.weight.data.normal_(0, init_std)
-        self.bias_lut.weight.data.normal_(0, init_std)
+        if self.nmodels == 1:
+            self.linear.weight.data.normal_(0, init_std)
+        else:
+            self.weight_lut.weight.data.normal_(0, init_std)
+            self.bias_lut.weight.data.normal_(0, init_std)
 
     def forward(self, input, model_ids):
         """

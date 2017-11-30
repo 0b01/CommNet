@@ -14,22 +14,38 @@ HIDSZ = 128
 USE_CUDA = False
 
 
-def train(episode):
+def train(nepisodes):
+    """train for number of nepisodes"""
     opts = {
-        'comm_encoder': False,      # bool
+        # model-related options
+        'model': 'mlp',             # mlp | lstm | rnn, (apparently `mlp == rnn` ?)
+        'hidsz': HIDSZ,             # the size of the internal state vector
         'nonlin': 'relu',           # relu | tanh | none
-        'nactions_comm': 0,         # discrete communication through action
-        'nwords': 1,                # TODO: figure out what this does
-        'encoder_lut_nil': None,
-        'encoder_lut': True,
-        'hidsz': HIDSZ,
-        'nmodels': N_MODELS,
-        'nagents': N_AGENTS,
-        'nactions': N_LEVERS,
-        'model': 'mlp',
-        'batch_size': BATCH_SIZE,
-        'fully_connected': True,
-        'comm_decoder': 0,
+        'init_std': 0.2,            # STD of initial weights
+        'init_hid': 0.1,            # weight of initial hidden
+        # unshare_hops
+        'encoder_lut': False,       # use LookupTable in encoder instead of Linear [False]
+        # encoder_lut_size
+
+        # comm-related options
+        'comm_mode': 'avg',         # operation on incoming communication: avg | sum [avg]
+        'comm_scale_div': 1,        # divide comm vectors by this [1]
+        'comm_encoder': 0,          # encode incoming comm: 0=identity | 1=linear [0]
+        'comm_decoder': 1,          # decode outgoing comm: 0=identity | 1=linear | 2=nonlin [1]
+        'comm_zero_init': True,     # initialize comm weights to zero
+        # comm_range
+        'nactions_comm': 0,         # enable discrete communication when larger than 1 [1]
+        # TODO: implement discrete comm
+        # dcomm_entropy_cost
+        'fully_connected': True,    # basically, all agent can talk to all agent
+
+
+        'nmodels': N_MODELS,        # the number of models in LookupTable
+        'nagents': N_AGENTS,        # the number of agents to look up
+        'nactions': N_LEVERS,       # the number of agent actions
+        'batch_size': BATCH_SIZE,   # the size of mini-batch
+
+
     }
 
     actor = CommNet(opts)
@@ -68,7 +84,7 @@ def train(episode):
         emb.weight.data = torch.eye(N_LEVERS).cuda()
 
     # main training loop
-    for i in range(episode):
+    for i in range(nepisodes):
         ids = np.array([np.random.choice(N_AGENTS, N_LEVERS, replace=False)
                         for _ in range(BATCH_SIZE)]) # ids shape: [BATCH_SIZE, N_AGENTS]
         model_ids = Variable(torch.from_numpy(np.reshape(ids, (1, -1))),
@@ -91,7 +107,59 @@ def train(episode):
                                                   model_ids,
                                                   comm_in)
 
-            # TODO: figure out how to do comm_mode: 'avg'
+            # # TODO: figure out how to do comm_mode: 'avg'
+
+            # if g_opts.comm or g_opts.nactions_comm > 1 then
+            #     -- determine which agent can talk to which agent?
+            #     local m = comm_mask_default:view(1, g_opts.nagents, g_opts.nagents)
+            #     m = m:expand(g_opts.batch_size, g_opts.nagents, g_opts.nagents):clone()
+
+            #     if g_opts.fully_connected then
+            #         -- pass all comm because it is fully connected
+            #     else
+            #         -- inactive agents don't communicate
+            #         local m2 = active[t]:view(g_opts.batch_size, g_opts.nagents, 1):clone()
+            #         m2 = m2:expandAs(m):clone()
+            #         m:cmul(m2)
+            #         m:cmul(m2:transpose(2,3))
+            #     end
+
+            #     if g_opts.comm_range > 0 then
+            #         -- far away agents can't communicate
+            #         for i, g in pairs(batch) do
+            #             for s = 1, g_opts.nagents do
+            #                 for d = 1, g_opts.nagents do
+            #                     local dy = math.abs(get_agent(g, s).loc.y - get_agent(g, d).loc.y)
+            #                     local dx = math.abs(get_agent(g, s).loc.x - get_agent(g, d).loc.x)
+            #                     local r = math.max(dy, dx)
+            #                     if r > g_opts.comm_range then
+            #                         m[i][s][d] = 0
+            #                     end
+            #                 end
+            #             end
+            #         end
+            #     end
+
+            #     if g_opts.comm_mode == 'avg' then
+            #         -- average comms by dividing by number of agents
+            #         m:cdiv(m:sum(2):expandAs(m):clone():add(m:eq(0):float()))
+            #     end
+            #     m:div(g_opts.comm_scale_div)
+            #     comm_mask[t] = m
+            # end
+
+            # if g_opts.comm then
+            #     -- communication vectors for next step
+            #     local h = out[g_model_outputs['comm_out']]:clone()
+            #     h = h:view(g_opts.batch_size, g_opts.nagents, g_opts.nagents, g_opts.hidsz)
+            #     -- apply mask
+            #     local m = comm_mask[t]
+            #     m = m:view(g_opts.batch_size, g_opts.nagents, g_opts.nagents, 1)
+            #     m = m:expandAs(h):clone()
+            #     h:cmul(m)
+            #     comm_state = h:transpose(2,3):clone()
+            #     comm_state:resize(g_opts.batch_size * g_opts.nagents, g_opts.nagents, g_opts.hidsz)
+            # end
             comm_in = comm_in.view(BATCH_SIZE, N_AGENTS, N_AGENTS, HIDSZ)
             comm_in = comm_in.transpose(1, 2)
             comm_in = comm_in.contiguous().view(BATCH_SIZE * N_AGENTS, N_AGENTS, HIDSZ)
