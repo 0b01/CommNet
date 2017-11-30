@@ -39,7 +39,7 @@ opts = {
     # comm-related options
     'comm_mode': 'avg',         # operation on incoming communication: avg | sum [avg]
     'comm_scale_div': 1,        # divide comm vectors by this [1]
-    'comm_encoder': 0,          # encode incoming comm: 0=identity | 1=linear [0]
+    'comm_encoder': 1,          # encode incoming comm: 0=identity | 1=linear [0]
     'comm_decoder': 1,          # decode outgoing comm: 0=identity | 1=linear | 2=nonlin [1]
     'comm_zero_init': True,     # initialize comm weights to zero
     # comm_range
@@ -48,11 +48,30 @@ opts = {
     # dcomm_entropy_cost
     'fully_connected': True,    # basically, all agent can talk to all agent
 
-
+    # game releated
     'nmodels': N_MODELS,        # the number of models in LookupTable
     'nagents': N_AGENTS,        # the number of agents to look up
     'nactions': N_LEVERS,       # the number of agent actions
-    'batch_size': BATCH_SIZE,   # the size of mini-batch
+
+    # training
+    'optim': 'rmsprop',             # optimization method: rmsprop | sgd | adam [rmsprop]
+    'lrate': 1e-3,              # learning rate [0.001]
+    # 'max_grad_norm':            # gradient clip value [0]
+    # 'clip_grad':                # gradient clip value [0]
+    # 'alpha':                    # coefficient of baseline term in the cost function [0.03]
+    # 'epochs':                   # the number of training epochs [100]
+    'batch_size': BATCH_SIZE,   # size of mini-batch (the number of parallel games) in each thread [16]
+    # 'nworker':                  # the number of threads used for training [18]
+    'reward_mult': 1,            # coeff to multiply reward for bprop [1]
+
+    # optimizer options
+    'momentum': 0,              # momentum for SGD [0]
+    'wdecay': 0,                # weight decay [0]
+    'rmsprop_alpha': 0.99,      # parameter of RMSProp [0.97]
+    'rmsprop_eps': 1e-6,        # parameter of RMSProp [1e-06]
+    'adam_beta1': 0.9,          # parameter of Adam [0.9]
+    'adam_beta2': 0.999,        # parameter of Adam [0.999]
+    'adam_eps': 1e-8,           # parameter of Adam [1e-08]
 }
 
 actor = CommNet(opts)
