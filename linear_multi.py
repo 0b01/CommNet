@@ -34,9 +34,9 @@ class LinearMulti(nn.Module):
         self.weight_lut.weight.data.zero_()
         self.bias_lut.weight.data.zero_()
 
-    def init_normal(self):
-        self.weight_lut.weight.data.normal_(0, 0.1)
-        self.bias_lut.weight.data.normal_(0, 0.1)
+    def init_normal(self, init_std):
+        self.weight_lut.weight.data.normal_(0, init_std)
+        self.bias_lut.weight.data.normal_(0, init_std)
 
     def forward(self, input, model_ids):
         """

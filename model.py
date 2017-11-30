@@ -1,3 +1,12 @@
+"""
+
+model.py
+
+Model definition for CommNet
+
+ported from (Lua)Torch
+
+"""
 import torch
 from torch import nn
 from linear_multi import LinearMulti
@@ -13,8 +22,11 @@ class Encoder(nn.Module):
         # self.lut = nn.Embedding(in_dim, hidsz) # in_dim agents, returns (batchsz, x, hidsz)
         # self._bias = nn.Parameter(torch.randn(hidsz), requires_grad=True)
         self.lin = nn.Linear(in_dim, hidsz)
-        
+
     def forward(self, inp):
+        """
+        transforms env observation to hidden
+        """
         return nn.ReLU()(self.lin(inp))
         # x = self.lut(inp)
         # x = torch.sum(x, 1)
@@ -22,16 +34,51 @@ class Encoder(nn.Module):
         # return x
 
 class CommNet(nn.Module):
+    """
+    Params:
+        opts: options
+            opts = {
+                # model-related options
+                'model': 'mlp',             # mlp | lstm | rnn, (apparently `mlp == rnn` ?)
+                'hidsz': HIDSZ,             # the size of the internal state vector
+                'nonlin': 'relu',           # relu | tanh | none
+                'init_std': 0.2,            # STD of initial weights
+                'init_hid': 0.1,            # weight of initial hidden
+                # unshare_hops
+                'encoder_lut': False,       # use LookupTable in encoder instead of Linear [False]
+                # encoder_lut_size
+
+                # comm-related options
+                'comm_mode': 'avg',         # operation on incoming communication: avg | sum [avg]
+                'comm_encoder': 0,          # encode incoming comm: 0=identity | 1=linear [0]
+                'comm_decoder': 1,          # decode outgoing comm: 0=identity | 1=linear | 2=nonlin [1]
+                'fully_connected': True,    # 
+
+
+                'nmodels': N_MODELS,        # the number of models in LookupTable
+                'nagents': N_AGENTS,        # the number of agents to look up
+                'nactions': N_LEVERS,       # the number of agent actions
+                'batch_size': BATCH_SIZE,   # the size of mini-batch
+
+                'nactions_comm': 0,         # enable discrete communication when larger than 1 [1]
+
+            }
+    """
     def __init__(self, opts):
         super(CommNet, self).__init__()
         self.opts = opts
+
         self.nmodels = opts['nmodels']
         self.nagents = opts['nagents']
+        self.model = opts['model']
         self.hidsz = opts['hidsz']
         self.nactions = opts['nactions']
         self.use_lstm = opts['model'] == 'lstm'
+        self.init_std = opts['init_std']
 
-        # Comm
+        self.agent_ids = None # placeholder for forward
+
+        # Comm -> hidden
         if self.opts['comm_encoder']:
             # before merging comm and hidden, use a linear layer for comm
             if self.use_lstm: # LSTM has 4x weights for gates
@@ -45,17 +92,17 @@ class CommNet(nn.Module):
         if self.use_lstm:
             self._rnn_enc = self.__build_encoder(self.hidsz * 4)
             self._rnn_linear = LinearMulti(self.nmodels, self.hidsz, self.hidsz * 4)
-            self._rnn_linear.init_normal()
+            self._rnn_linear.init_normal(self.init_std)
         else:
             self._rnn_enc = self.__build_encoder(self.hidsz)
             self._rnn_linear = LinearMulti(self.nmodels, self.hidsz, self.hidsz)
-            self._rnn_linear.init_normal()
+            self._rnn_linear.init_normal(self.init_std)
 
         # Action layer
         self._action_linear = LinearMulti(self.nmodels, self.hidsz, self.nactions)
-        self._action_linear.init_normal()
+        self._action_linear.init_normal(self.init_std)
         self._action_baseline_linear = LinearMulti(self.nmodels, self.hidsz, 1)
-        self._action_baseline_linear.init_normal()
+        self._action_baseline_linear.init_normal(self.init_std)
 
         # Comm_out
         self._comm_out_linear = LinearMulti(self.nmodels, self.hidsz, self.hidsz * self.nagents)
@@ -68,54 +115,88 @@ class CommNet(nn.Module):
         nactions_comm = self.opts['nactions_comm']
         if nactions_comm > 1:
             self._action_comm_linear = LinearMulti(self.nmodels, self.hidsz, nactions_comm)
-        
 
+    def forward(self, inp, prev_hid, prev_cell, agent_ids, comm_in):
+        """
+        One communication pass. For each "hop" there may be several passes
+        Params:
+            inp: [batch x nagents, input_dim], s_j, state view of all agent, this
+                is also used as skip connection f(h^i, c^i, h^0) where
+                    h^0 = self.__rnn_enc(s^0)
+            prev_hid: [batch x nagents, hidsz], previous hidden
+            prev_cell: [batch x nagents, hidsz] if LSTM, otherwise None
+            agent_ids: [1, batch x nagents]
+            comm_in: [batch x nagents, nagents, hidsz], c^0_j = 0 for all j
+        Returns:
+            action_prob: q(h), can be sampled using toch.multinomial
+            baseline: v(h)
+            hidstate:
+            cell_out:
+            comm_out:
+            action_comm:
+        """
+        self.agent_ids = agent_ids
 
-    def forward(self, inp, prev_hid, prev_cell, model_ids, comm_in):
-        self.model_ids = model_ids
-        comm2hid = self.__comm2hid(comm_in)
-        # below are the return values, for next time step
+        # c0 -> c'
+        comm_ = self.__comm2hid(comm_in)
+
+        # initalize return tuple for all of the below values    
+        ret = [None] * 6
+
+        # (c', h0) -> h1
         if self.use_lstm:
-            hidstate, prev_cell = self.__hidstate(inp, prev_hid, prev_cell, comm2hid)
+            next_hid, next_cell = self.__hid2hid(inp, comm_, prev_hid, prev_cell)
+            ret[2], ret[3] = next_hid, next_cell
         else:
-            hidstate = self.__hidstate(inp, prev_hid, prev_cell, comm2hid)
+            next_hid = self.__hid2hid(inp, comm_, prev_hid, None)
+            ret[2] = next_hid 
 
-        action_prob, baseline = self.__action(hidstate)
+        action_prob, baseline = self.__action(next_hid)
+        ret[0], ret[1] = action_prob, baseline
 
-        comm_out = self.__comm_out(hidstate)
+        comm_out = self.__comm_out(next_hid)
+        ret[4] = comm_out
 
         if self.opts['nactions_comm'] > 1:
-            action_comm = self.__action_comm(hidstate)
-            return (action_prob, baseline, hidstate, comm_out, action_comm)
-        else:
-            return (action_prob, baseline, hidstate, comm_out)
+            action_comm = self.__action_comm(next_hid)
+            ret[5] = action_comm
+
+        return tuple(ret)
 
     def __comm2hid(self, comm_in):
-        # Lua Sum(2) -> Python sum(1), shape: [batch x nagents, hidden]
-        comm2hid = torch.sum(comm_in, 1) # XXX: sum(2) -> 0-index
+        """
+            c0 -> c'
+        """
+        # Lua Sum(2) -> Python sum(1)
+        # [batch x nagents, nagents, hidsz] -> [batch x nagents, hidsz]
+        comm2hid = torch.sum(comm_in, 1)
         if self.opts['comm_encoder']:
-            comm2hid = self._comm2hid_linear(comm2hid, self.model_ids)
+            comm2hid = self._comm2hid_linear(comm2hid, self.agent_ids)
         return comm2hid
 
-    def __hidstate(self, inp, prev_hid, prev_cell, comm2hid):
-        if self.opts['model'] == 'mlp' or self.opts['model'] == 'rnn':
-            hidstate = self._rnn(inp, prev_hid, comm2hid)
+    def __hid2hid(self, inp, comm_, prev_hid, prev_cell):
+        """
+            (c', h0, c?) -> h1
+        """
+        if self.model in ('mlp', 'rnn'):
+            hidstate = self._rnn(inp, comm_, prev_hid)
         elif self.use_lstm:
-            hidstate, cellstate = self._lstm(inp, prev_hid, prev_cell, comm2hid, self.model_ids)
+            hidstate, cellstate = self._lstm(inp, comm_, prev_hid, prev_cell)
             return hidstate, cellstate
         else:
             raise Exception('model not supported')
         return hidstate
 
-    def _lstm(self, inp, prev_hid, prev_cell, comm_in):
+    def _lstm(self, inp, comm_, prev_hid, prev_cell):
         pre_hid = []
         pre_hid.append(self._rnn_enc(inp))
-        pre_hid.append(self._rnn_linear(prev_hid, self.model_ids))
+        pre_hid.append(self._rnn_linear(prev_hid, self.agent_ids))
         # if comm_in:
-        pre_hid.append(comm_in)
+        pre_hid.append(comm_)
         A = sum(pre_hid)
         B = A.view(-1, 4, self.hidsz)
         C = torch.split(B, self.hidsz, 0)
+        # TODO: not finished
 
         gate_forget = nn.Sigmoid()(C[0][0])
         gate_write = nn.Sigmoid()(C[0][1])
@@ -130,42 +211,42 @@ class CommNet(nn.Module):
         hidstate = torch.matmul(self.__nonlin()(cellstate), gate_read)
         return hidstate, cellstate
 
-    def _rnn(self, inp, prev_hid, comm_in):
+    def _rnn(self, inp, comm_, prev_hid):
+        """ returns RNN is just a FC layer, next hidden """
         pre_hid = []
-        pre_hid.append(self._rnn_enc(inp))
-
-        pre_hid.append(self._rnn_linear(prev_hid, self.model_ids))
-        # if comm_in:
-        pre_hid.append(comm_in)
-
-        sum_pre_hid = sum(pre_hid)
-        hidstate = self.__nonlin()(sum_pre_hid)
-        return hidstate
+        pre_hid.append(self._rnn_enc(inp)) # encodes input state into feature vec
+        pre_hid.append(self._rnn_linear(prev_hid, self.agent_ids))
+        pre_hid.append(comm_) # if comm_:
+        return self.__nonlin()(sum(pre_hid))
 
     def __action(self, hidstate):
-        action = self._action_linear(hidstate, self.model_ids)
+        """
+            policy and value functions share parameters
+            h1 -> (pi(h1), V(h1))
+        """
+        action = self._action_linear(hidstate, self.agent_ids)
         action_prob = nn.Softmax()(action) # was LogSoftmax
 
-        baseline =  self._action_baseline_linear(hidstate, self.model_ids)
+        baseline =  self._action_baseline_linear(hidstate, self.agent_ids)
 
         return action_prob, baseline
 
     def __comm_out(self, hidstate):
         if self.opts['fully_connected']:
-            comm_out = self._comm_out_linear(hidstate, self.model_ids)
+            comm_out = self._comm_out_linear(hidstate, self.agent_ids)
             amount = self.opts['nagents'] - 1
             return comm_out / amount
         else:
             comm_out = hidstate
             if self.opts['comm_decoder'] >= 1:
-                comm_out = self._comm_out_linear_alt(comm_out, self.model_ids) # hidsz -> hidsz
+                comm_out = self._comm_out_linear_alt(comm_out, self.agent_ids) # hidsz -> hidsz
                 if self.opts['comm_decoder'] == 2:
                     comm_out = self.__nonlin()(comm_out)
             comm_out.repeat(self.nagents, 2) # hidsz -> 2 x hidsz # original: comm_out = nn.Contiguous()(nn.Replicate(self.nagents, 2)(comm_out))
         return comm_out
 
     def __action_comm(self, hidstate):
-        action_comm = self._action_comm_linear(hidstate, self.model_ids)
+        action_comm = self._action_comm_linear(hidstate, self.agent_ids)
         action_comm = nn.LogSoftmax()(action_comm)
         return action_comm
 
@@ -188,4 +269,3 @@ class CommNet(nn.Module):
             return Encoder(in_dim, hidsz)
         else:                                          # if only 1 agent
             return nn.Linear(in_dim, hidsz)
-
