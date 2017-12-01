@@ -112,6 +112,7 @@ class Levers(object):
         return agent_ids
 
     def communicate(self, agent_ids):
+        """given input and agent_ids, let NN communicate and output action"""
         action_prob,\
         _baseline,\
         self.prev_hid,\
