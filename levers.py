@@ -111,45 +111,47 @@ class Levers(object):
                             requires_grad=False)
         return agent_ids
 
-    def communicate(self, agent_ids):
+    def communicate(self, agent_ids, passes=2):
         """given input and agent_ids, let NN communicate and output action"""
-        action_prob,\
-        _baseline,\
-        self.prev_hid,\
-        self.prev_cell,\
-        self.comm_in, self._action_comm = self.actor.forward(self.inp,
-                                            self.prev_hid,
-                                            self.prev_cell,
-                                            agent_ids,
-                                            self.comm_in)
 
-        # -- determine which agent can talk to which agent?
-        mask = self.comm_mask_default.view(1, N_AGENTS, N_AGENTS)
-        mask = mask.expand(BATCH_SIZE, N_AGENTS, N_AGENTS)
+        for _ in range(passes):
+            action_prob,\
+            _baseline,\
+            self.prev_hid,\
+            self.prev_cell,\
+            self.comm_in, self._action_comm = self.actor.forward(self.inp,
+                                                self.prev_hid,
+                                                self.prev_cell,
+                                                agent_ids,
+                                                self.comm_in)
 
-        # if opts['fully_connected']:
-        #     # -- pass all comm because it is fully connected
-        # else:
-        #     # -- inactive agents don't communicate
-        #     # local m2 = active[t]:view(BATCH_SIZE, g_opts.nagents, 1):clone()
-        #     # m2 = m2:expandAs(m):clone()
-        #     # m:cmul(m2)
-        #     # m:cmul(m2:transpose(2,3))
-        #     # NOTE: we don't have the concept of active tensor, yet...
-        #     pass
+            # -- determine which agent can talk to which agent?
+            mask = self.comm_mask_default.view(1, N_AGENTS, N_AGENTS)
+            mask = mask.expand(BATCH_SIZE, N_AGENTS, N_AGENTS)
 
-        if self.opts['comm_mode'] == 'avg':
-            mask = mask / (N_AGENTS - 1)
-        mask = mask / self.opts['comm_scale_div']
+            # if opts['fully_connected']:
+            #     # -- pass all comm because it is fully connected
+            # else:
+            #     # -- inactive agents don't communicate
+            #     # local m2 = active[t]:view(BATCH_SIZE, g_opts.nagents, 1):clone()
+            #     # m2 = m2:expandAs(m):clone()
+            #     # m:cmul(m2)
+            #     # m:cmul(m2:transpose(2,3))
+            #     # NOTE: we don't have the concept of active tensor, yet...
+            #     pass
 
-        # -- communication vectors for next step
-        self.comm_in = self.comm_in.view(BATCH_SIZE, N_AGENTS, N_AGENTS, HIDSZ)
-        # -- apply mask
-        mask = mask.view(BATCH_SIZE, N_AGENTS, N_AGENTS, 1)
-        mask = mask.expand_as(self.comm_in)
-        self.comm_in = self.comm_in * mask
-        self.comm_in = self.comm_in.transpose(1, 2)
-        self.comm_in = self.comm_in.contiguous().view(BATCH_SIZE * N_AGENTS, N_AGENTS, HIDSZ)
+            if self.opts['comm_mode'] == 'avg':
+                mask = mask / (N_AGENTS - 1)
+            mask = mask / self.opts['comm_scale_div']
+
+            # -- communication vectors for next step
+            self.comm_in = self.comm_in.view(BATCH_SIZE, N_AGENTS, N_AGENTS, HIDSZ)
+            # -- apply mask
+            mask = mask.view(BATCH_SIZE, N_AGENTS, N_AGENTS, 1)
+            mask = mask.expand_as(self.comm_in)
+            self.comm_in = self.comm_in * mask
+            self.comm_in = self.comm_in.transpose(1, 2)
+            self.comm_in = self.comm_in.contiguous().view(BATCH_SIZE * N_AGENTS, N_AGENTS, HIDSZ)
 
         return action_prob, _baseline
 
@@ -192,8 +194,7 @@ class Levers(object):
                 agent_ids = agent_ids.cuda()
 
             # communication passes, K
-            for _k in range(2):
-                action_prob, _baseline = self.communicate(agent_ids)
+            action_prob, _baseline = self.communicate(agent_ids, passes=2)
 
             lever_output, loss, repeat_reward, _one_hot = self.get_reward(action_prob)
             # since multinomial creates a stochastic function, reinforce
@@ -256,8 +257,7 @@ class Levers(object):
     def infer(self):
         self.actor = torch.load("model.pt")
         agent_ids = self.get_agent_ids()
-        for _k in range(2):
-            action_prob, _baseline = self.communicate(agent_ids)
+        action_prob, _baseline = self.communicate(agent_ids, passes=2)
         
 
         _, loss, _, one_hot = self.get_reward(action_prob)
