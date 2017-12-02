@@ -258,7 +258,11 @@ class Levers(object):
 
     def infer(self):
         """
-        reshape the number of agents want to infer into different batches
+        reshape the number of agents want to infer into different batches.
+        during inference, the size of the original weights, especially nagents
+        will be the same as training (NAGENT_PER_BATCH). hence change the number
+        of batches to include all the model_ids you want to evaluate... this seems
+        to be the only solution
         """
         NAGENTS_PER_BATCH = 5
         ids = np.array([np.arange(self.nmodels)
@@ -280,7 +284,6 @@ class Levers(object):
         _, loss, _, one_hot = self.get_reward(action_prob)
 
         print one_hot.view(-1, NAGENTS_PER_BATCH)
-        print loss.sum() / self.batch_size
 
 if __name__ == "__main__":
     game = Levers()

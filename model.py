@@ -252,7 +252,7 @@ class CommNet(nn.Module):
                 comm_out = self._comm_out_linear_alt(comm_out, self.agent_ids) # hidsz -> hidsz
                 if self.opts['comm_decoder'] == 2:
                     comm_out = self.__nonlin()(comm_out)
-            comm_out.repeat(self.nagents, 2) # hidsz -> 2 x hidsz # original: comm_out = nn.Contiguous()(nn.Replicate(self.nagents, 2)(comm_out))
+            comm_out = comm_out.repeat(self.nagents, 1) # hidsz -> 2 x hidsz # original: comm_out = nn.Contiguous()(nn.Replicate(self.nagents, 2)(comm_out))
         return comm_out
 
     def __action_comm(self, hidstate):
