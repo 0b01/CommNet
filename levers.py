@@ -8,7 +8,7 @@ from torch import nn
 import torch
 
 BATCH_SIZE = 16
-N_AGENTS = 5
+N_AGENTS = 10
 N_MODELS = 10
 N_LEVERS = 5
 HIDSZ = 128
@@ -83,7 +83,7 @@ class Levers(object):
         self.comm_in = Variable(torch.zeros(BATCH_SIZE * N_AGENTS, N_AGENTS, HIDSZ)
                         .type(torch.FloatTensor),
                         requires_grad=False)
-        self.comm_mask_default = Variable(torch.ones(N_AGENTS, N_AGENTS) - torch.eye(N_AGENTS, N_AGENTS),
+        self.comm_mask_default = Variable(torch.ones(N_AGENTS, N_LEVERS) - torch.eye(N_AGENTS, N_LEVERS),
                                     requires_grad=False)
 
         # # loss function is for supervised training
@@ -105,7 +105,7 @@ class Levers(object):
             self.emb.weight.data = torch.eye(N_LEVERS).cuda()
     
     def get_agent_ids(self):
-        ids = np.array([np.random.choice(N_AGENTS, N_LEVERS, replace=False)
+        ids = np.array([np.random.choice(N_MODELS, N_AGENTS, replace=False)
                         for _ in range(BATCH_SIZE)]) # ids shape: [BATCH_SIZE, N_AGENTS]
         agent_ids = Variable(torch.from_numpy(np.reshape(ids, (1, -1))),
                             requires_grad=False)
@@ -126,8 +126,8 @@ class Levers(object):
                                                 self.comm_in)
 
             # -- determine which agent can talk to which agent?
-            mask = self.comm_mask_default.view(1, N_AGENTS, N_AGENTS)
-            mask = mask.expand(BATCH_SIZE, N_AGENTS, N_AGENTS)
+            mask = self.comm_mask_default.view(1, N_AGENTS, N_LEVERS)
+            mask = mask.expand(BATCH_SIZE, N_AGENTS, N_LEVERS)
 
             # if opts['fully_connected']:
             #     # -- pass all comm because it is fully connected
@@ -145,13 +145,13 @@ class Levers(object):
             mask = mask / self.opts['comm_scale_div']
 
             # -- communication vectors for next step
-            self.comm_in = self.comm_in.view(BATCH_SIZE, N_AGENTS, N_AGENTS, HIDSZ)
+            self.comm_in = self.comm_in.view(BATCH_SIZE, N_AGENTS, N_LEVERS, HIDSZ)
             # -- apply mask
-            mask = mask.view(BATCH_SIZE, N_AGENTS, N_AGENTS, 1)
+            mask = mask.view(BATCH_SIZE, N_AGENTS, N_LEVERS, 1)
             mask = mask.expand_as(self.comm_in)
             self.comm_in = self.comm_in * mask
             self.comm_in = self.comm_in.transpose(1, 2)
-            self.comm_in = self.comm_in.contiguous().view(BATCH_SIZE * N_AGENTS, N_AGENTS, HIDSZ)
+            self.comm_in = self.comm_in.contiguous().view(BATCH_SIZE * N_AGENTS, N_LEVERS, HIDSZ)
 
         return action_prob, _baseline
 
@@ -227,7 +227,7 @@ class Levers(object):
     def get_reward(self, action_prob):
         # sample an output
         lever_output = torch.multinomial(action_prob, 1)        # something like 1, 2, 3, 4, 5
-        lever_ids = lever_output.view(BATCH_SIZE, N_LEVERS)     # BATCH_SIZE x N_LEVERS
+        lever_ids = lever_output.view(BATCH_SIZE, N_AGENTS)     # BATCH_SIZE x N_LEVERS
         one_hot = self.emb(lever_ids)                                # BATCH_SIZE x N_LEVERS x N_LEVERS
 
         # sum the LEVER axis, then count the number of chosen levers
