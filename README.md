@@ -24,6 +24,10 @@ Each agent must pull a different lever after 2 communication passes. Since the a
 
 ![accuracy](https://raw.githubusercontent.com/rickyhan/CommNet/master/accuracy.png)
 
+# Weights
+
+The weights file included in this repo is trained on the first 5 agents out of a pool of 10 models.
+
 # Options
 
 ```python

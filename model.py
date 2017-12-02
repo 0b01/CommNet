@@ -245,8 +245,7 @@ class CommNet(nn.Module):
     def __comm_out(self, hidstate):
         if self.opts['fully_connected']:
             comm_out = self._comm_out_linear(hidstate, self.agent_ids)
-            amount = self.opts['nagents'] - 1
-            return comm_out / amount
+            return comm_out
         else:
             comm_out = hidstate
             if self.opts['comm_decoder'] >= 1:
